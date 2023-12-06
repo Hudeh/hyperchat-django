@@ -1,0 +1,189 @@
+{% extends 'core/base.html' %}
+
+{% block title %}{{ room.name }} | {% endblock %}
+
+{% block content %}
+<div class="p-10 lg:p-20 text-center">
+    <h1 class="text-3xl lg:text-6xl text-white">{{ room.name }}</h1>
+</div>
+
+<div class="lg:w-2/4 mx-4 lg:mx-auto p-4 bg-white rounded-xl">
+    <div class="chat-messages space-y-3" id="chat-messages">
+        {% for m in messages %}
+            <b>{{ m.sender.username }}</b>: {{ m.timestamp }} <br>
+            {{ m.message }}<br>
+            {% if m.attachment %}
+                {% if m.attachment.url %}
+                    {% with m.attachment.url as file_url %}
+                        {% if '.mp4' in file_url|lower or '.avi' in file_url|lower or '.mov' in file_url|lower %}
+                            <video controls style="max-width: 100px; max-height: 100px;">
+                                <source src="{{ file_url }}" type="video/mp4">
+                                Your browser does not support the video tag.
+                            </video>
+                        {% elif '.jpg' in file_url|lower or '.jpeg' in file_url|lower or '.png' in file_url|lower or '.gif' in file_url|lower %}
+                            <img src="{{ file_url }}" alt="Attached Image" style="max-width: 100px; max-height: 100px;">
+                        {% else %}
+                            <a href="{{ file_url }}" download>Download File</a>
+                        {% endif %}
+                    {% endwith %}
+                {% endif %}
+            {% endif %}
+            <br>
+        {% endfor %}
+    </div>
+</div>
+
+
+<div class="lg:w-2/4 mt-6 mx-4 lg:mx-auto p-4 bg-white rounded-xl">
+    <form method="post" action="." class="flex">
+        <input type="text" name="message" class="flex-1 mr-3 border-none outline-none" placeholder="Your message..." id="chat-message-input">
+        <input type="file" name="attachment" class="flex-1 mr-3 border-none outline-none" id="chat-attachment-input">
+
+        <button 
+            class="px-5 py-3 rounded-xl text-white bg-teal-600 hover:bg-teal-700"
+            id="chat-message-submit"
+        >Submit</button>
+    </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ room.slug|json_script:"json-roomname" }}
+{{ request.user.username|json_script:"json-username" }}
+
+<script>
+    const roomName = JSON.parse(document.getElementById('json-roomname').textContent);
+    const userName = JSON.parse(document.getElementById('json-username').textContent);
+    const chatSocket = new WebSocket(
+        'ws://'
+        + window.location.host
+        + '/ws/chat/'
+        + roomName
+        + '/'
+    );
+
+    chatSocket.onclose = function(e) {
+        console.log('onclose')
+    }
+
+    chatSocket.onmessage = function (e) {
+    const data = JSON.parse(e.data);
+
+   const messageContainer = document.querySelector('#chat-messages');
+    const messageElement = document.createElement('div');
+
+    const usernameElement = document.createElement('b');
+    usernameElement.textContent = data.username;
+    messageElement.appendChild(usernameElement);
+
+    messageElement.appendChild(document.createElement('br'));
+
+    const messageContent = document.createElement('span');
+    messageContent.textContent = data.message;
+    messageElement.appendChild(messageContent);
+
+    messageElement.appendChild(document.createElement('br'));
+
+
+    if (data.attachment) {
+        const attachmentElement = document.createElement('a');
+        attachmentElement.textContent = 'View Attachment';
+        if (isImage(data.attachment)) {
+            attachmentElement.href = data.attachment;
+            attachmentElement.innerHTML = '<img src="' + data.attachment + '" alt="Image" style="max-width: 100px; max-height: 100px;" />';
+        } else if (isVideo(data.attachment)) {
+            attachmentElement.href = data.attachment;
+            attachmentElement.textContent = 'Play Video';
+            attachmentElement.innerHTML = '<video width="320" height="240" controls><source src="' + data.attachment + '" type="video/mp4"></video>';
+        } else {
+            attachmentElement.href = data.attachment;
+            attachmentElement.textContent = 'Download File';
+        }
+        messageElement.appendChild(attachmentElement);
+    }
+
+    messageContainer.appendChild(messageElement);
+    scrollToBottom();
+};
+
+function isImage(attachment) {
+    // Implement logic to check if the attachment is an image (e.g., by file extension or MIME type)
+    // Return true if it's an image, false otherwise
+    return attachment.endsWith('.jpg') || attachment.endsWith('.png') || attachment.endsWith('.gif');
+}
+
+function isVideo(attachment) {
+    // Implement logic to check if the attachment is a video (e.g., by file extension or MIME type)
+    // Return true if it's a video, false otherwise
+    return attachment.endsWith('.mp4') || attachment.endsWith('.avi') || attachment.endsWith('.mov');
+}
+
+
+    document.querySelector('#chat-message-input').focus();
+    document.querySelector('#chat-message-input').onkeyup = function(e) {
+        if (e.keyCode === 13) {
+            document.querySelector('#chat-message-submit').click();
+        }
+    };
+
+    document.querySelector('#chat-message-submit').onclick = function(e) {
+    e.preventDefault();
+
+    const messageInputDom = document.querySelector('#chat-message-input');
+    const message = messageInputDom.value;
+    const fileInputDom = document.querySelector('#chat-attachment-input');
+    const file = fileInputDom.files[0];
+
+    if (!message.trim()) {
+        alert('Please enter a message.');
+        return;
+    }
+
+    const reader = new FileReader();
+
+    reader.onloadend = function () {
+        const base64data = reader.result;
+
+        const data = {
+            'message': message,
+            'username': userName,
+            'chat_room': roomName,
+            'attachment': base64data  // Sending file content as Base64
+        };
+
+        chatSocket.send(JSON.stringify(data));
+    };
+
+    if (file) {
+        reader.readAsDataURL(file);
+    } else {
+        // If no file is selected, send the message without file content
+        const data = {
+            'message': message,
+            'username': userName,
+            'chat_room': roomName
+
+        };
+
+        chatSocket.send(JSON.stringify(data));
+    }
+
+    messageInputDom.value = '';
+    fileInputDom.value = '';
+
+    return false;
+};
+
+
+    /**
+    * A function for finding the messages element, and scroll to the bottom of it.
+    */
+    function scrollToBottom() {
+        let objDiv = document.getElementById("chat-messages");
+        objDiv.scrollTop = objDiv.scrollHeight;
+    }
+
+    // Add this below the function to trigger the scroll on load.
+    scrollToBottom();
+</script>
+{% endblock %}
